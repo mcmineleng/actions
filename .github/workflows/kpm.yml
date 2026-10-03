@@ -1,0 +1,58 @@
+name: 编译KPM
+
+on:
+  workflow_dispatch:
+    inputs:
+      framework:
+        description: '选择框架'
+        required: true
+        type: choice
+        options:
+          - KernelPatch
+          - KPatch-Next
+      kpm_repo:
+        description: 'KPM 仓库完整地址 (例如 https://github.com/user/my-kpm)'
+        required: true
+        type: string
+      kpm_path:
+        description: 'KPM 在仓库中的路径 (留空则为根目录)'
+        required: false
+        type: string
+        default: '.'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拉取 KPM 仓库
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.kpm_repo }}
+          path: kpm-src
+
+      - name: 根据选择拉取框架源码
+        run: |
+          if [ "${{ inputs.framework }}" = "KernelPatch" ]; then
+            git clone --depth 1 https://github.com/bmax121/KernelPatch.git framework
+          else
+            git clone --depth 1 https://github.com/KernelSU-Next/KPatch-Next.git framework
+          fi
+
+      - name: 下载并安装 ARM 官方裸机工具链
+        run: |
+          wget -q https://developer.arm.com/-/media/Files/downloads/gnu/14.2.rel1/binrel/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-elf.tar.xz
+          tar -xJf arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-elf.tar.xz -C /opt
+          echo "/opt/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-elf/bin" >> $GITHUB_PATH
+
+      - name: 编译 KPM
+        working-directory: kpm-src/${{ inputs.kpm_path }}
+        run: |
+          export TARGET_COMPILE=aarch64-none-elf-
+          make KP_DIR=$GITHUB_WORKSPACE/framework
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: kpm-output
+          path: kpm-src/${{ inputs.kpm_path }}/*.kpm
+          if-no-files-found: warn
