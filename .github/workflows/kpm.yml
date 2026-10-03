@@ -11,27 +11,75 @@ on:
           - KernelPatch
           - KPatch-Next
       kpm_repo:
-        description: 'KPM 仓库完整地址 (例如 https://github.com/user/my-kpm)'
+        description: 'KPM 仓库地址 (支持 https://github.com/owner/repo 或 owner/repo，其他 Git 地址走 git clone)'
         required: true
         type: string
       kpm_path:
-        description: 'KPM 在仓库中的路径 (留空则为根目录)'
+        description: 'KPM 在仓库中的路径 (留空或 . 表示根目录)'
         required: false
         type: string
-        default: '.'
+        default: ''
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: 拉取 KPM 仓库
+      - name: 解析仓库地址与路径
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          REPO="${{ inputs.kpm_repo }}"
+          KPATH="${{ inputs.kpm_path }}"
+
+          # 规范化 kpm_path：空字符串或 . 都当作根目录
+          if [ -z "$KPATH" ] || [ "$KPATH" = "." ] || [ "$KPATH" = "./" ]; then
+            KPATH=""
+          fi
+          # 去掉开头结尾多余的斜杠，避免拼出 // 或 /./ 
+          KPATH="${KPATH#/}"
+          KPATH="${KPATH%/}"
+          echo "kpm_path_norm=$KPATH" >> "$GITHUB_OUTPUT"
+
+          # 判断仓库类型
+          if [[ "$REPO" =~ ^https://github\.com/([^/]+)/([^/]+?)(\.git)?/?$ ]]; then
+            # 完整的 GitHub URL -> 提取 owner/repo
+            OWNER="${BASH_REMATCH[1]}"
+            NAME="${BASH_REMATCH[2]}"
+            echo "mode=github" >> "$GITHUB_OUTPUT"
+            echo "repo_slug=${OWNER}/${NAME}" >> "$GITHUB_OUTPUT"
+            echo "clone_url=" >> "$GITHUB_OUTPUT"
+          elif [[ "$REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+            # 短格式 owner/repo -> 也走官方 checkout
+            echo "mode=github" >> "$GITHUB_OUTPUT"
+            echo "repo_slug=${REPO}" >> "$GITHUB_OUTPUT"
+            echo "clone_url=" >> "$GITHUB_OUTPUT"
+          else
+            # 其他 Git 地址 -> 走 git clone
+            echo "mode=git" >> "$GITHUB_OUTPUT"
+            echo "repo_slug=" >> "$GITHUB_OUTPUT"
+            echo "clone_url=${REPO}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 拉取 KPM 仓库 (GitHub 官方 checkout)
+        if: steps.resolve.outputs.mode == 'github'
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.kpm_repo }}
+          repository: ${{ steps.resolve.outputs.repo_slug }}
           path: kpm-src
 
-      - name: 根据选择拉取框架源码
+      - name: 拉取 KPM 仓库 (通用 git clone)
+        if: steps.resolve.outputs.mode == 'git'
+        shell: bash
         run: |
+          set -euo pipefail
+          git clone --depth 1 "${{ steps.resolve.outputs.clone_url }}" kpm-src
+
+      - name: 根据选择拉取框架源码
+        shell: bash
+        run: |
+          set -euo pipefail
           if [ "${{ inputs.framework }}" = "KernelPatch" ]; then
             git clone --depth 1 https://github.com/bmax121/KernelPatch.git framework
           else
@@ -39,20 +87,43 @@ jobs:
           fi
 
       - name: 下载并安装 ARM 官方裸机工具链
+        shell: bash
         run: |
+          set -euo pipefail
           wget -q https://developer.arm.com/-/media/Files/downloads/gnu/14.2.rel1/binrel/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-elf.tar.xz
           tar -xJf arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-elf.tar.xz -C /opt
-          echo "/opt/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-elf/bin" >> $GITHUB_PATH
+          echo "/opt/arm-gnu-toolchain-14.2.rel1-x86_64-aarch64-none-elf/bin" >> "$GITHUB_PATH"
 
       - name: 编译 KPM
-        working-directory: kpm-src/${{ inputs.kpm_path }}
+        shell: bash
+        working-directory: kpm-src/${{ steps.resolve.outputs.kpm_path_norm }}
         run: |
+          set -euo pipefail
           export TARGET_COMPILE=aarch64-none-elf-
-          make KP_DIR=$GITHUB_WORKSPACE/framework
+          make KP_DIR="$GITHUB_WORKSPACE/framework"
+
+      - name: 收集 KPM 产物路径
+        id: collect
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 规范化产物目录，去掉 ./ 与多余斜杠
+          BASE="kpm-src"
+          KPATH="${{ steps.resolve.outputs.kpm_path_norm }}"
+          if [ -n "$KPATH" ]; then
+            DIR="$BASE/$KPATH"
+          else
+            DIR="$BASE"
+          fi
+          NORMALIZED=$(realpath -m "$DIR")
+          # 转成相对 GITHUB_WORKSPACE 的路径（upload-artifact 不接受绝对路径里的 .. / . 片段）
+          REL="${NORMALIZED#"$GITHUB_WORKSPACE"/}"
+          echo "dir=$REL" >> "$GITHUB_OUTPUT"
+          echo "解析到的产物目录: $REL"
 
       - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
           name: kpm-output
-          path: kpm-src/${{ inputs.kpm_path }}/*.kpm
+          path: ${{ steps.collect.outputs.dir }}/*.kpm
           if-no-files-found: warn
