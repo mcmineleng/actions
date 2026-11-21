@@ -1,0 +1,71 @@
+name: build-jq-zip-android
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      NDK_VERSION: r26b
+      API: 26
+      TARGET: aarch64-linux-android
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup NDK
+        run: |
+          echo "Installing NDK ${NDK_VERSION}"
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;${NDK_VERSION}" >/dev/null
+          echo "NDK_ROOT=$ANDROID_HOME/ndk/${NDK_VERSION}" >> $GITHUB_ENV
+
+      - name: Prepare toolchain env
+        run: |
+          TC=$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64
+          echo "TOOLCHAIN=$TC" >> $GITHUB_ENV
+          echo "CC=$TC/bin/${TARGET}${API}-clang" >> $GITHUB_ENV
+          echo "CXX=$TC/bin/${TARGET}${API}-clang++" >> $GITHUB_ENV
+          echo "AR=$TC/bin/llvm-ar" >> $GITHUB_ENV
+          echo "STRIP=$TC/bin/llvm-strip" >> $GITHUB_ENV
+          echo "RANLIB=$TC/bin/llvm-ranlib" >> $GITHUB_ENV
+
+      - name: Build jq
+        run: |
+          git clone --depth 1 --branch jq-1.7.1 https://github.com/jqlang/jq.git jq-src
+          cd jq-src
+          ./configure --host=${TARGET} --disable-shared --enable-static \
+            --disable-docs \
+            CC="$CC" AR="$AR" STRIP="$STRIP" RANLIB="$RANLIB"
+          make -j$(nproc)
+          "$STRIP" ./jq
+          cp ./jq "$GITHUB_WORKSPACE/jq"
+
+      - name: Build zip
+        run: |
+          curl -L -o zip30.tar.gz \
+            "https://downloads.sourceforge.net/project/infozip/Zip%203.x%20%28latest%29/3.0/zip30.tar.gz"
+          tar xf zip30.tar.gz
+          cd zip30
+          make -f unix/Makefile generic \
+            CC="$CC" AR="$AR" STRIP="$STRIP" RANLIB="$RANLIB" \
+            LFLAGS2="-static"
+          "$STRIP" ./zip
+          cp ./zip "$GITHUB_WORKSPACE/zip"
+
+      - name: Verify artifacts
+        run: |
+          file jq zip || true
+          ls -lh jq zip
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: jq-zip-arm64-v8a
+          path: |
+            jq
+            zip
+          if-no-files-found: error
