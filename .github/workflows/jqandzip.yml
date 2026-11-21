@@ -11,8 +11,6 @@ jobs:
       TARGET: aarch64-linux-android
 
     steps:
-      - uses: actions/checkout@v4
-
       - name: Setup NDK (direct download r26b)
         run: |
           set -euo pipefail
@@ -22,6 +20,11 @@ jobs:
           unzip -q "$NDK_ZIP"
           echo "NDK_ROOT=$GITHUB_WORKSPACE/android-ndk-r26b" >> $GITHUB_ENV
           rm -f "$NDK_ZIP"
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bison flex autoconf automake libtool
 
       - name: Prepare toolchain env
         run: |
@@ -37,6 +40,7 @@ jobs:
         run: |
           git clone --depth 1 --branch jq-1.7.1 https://github.com/jqlang/jq.git jq-src
           cd jq-src
+          autoreconf -i
           ./configure --host=${TARGET} --disable-shared --enable-static \
             --disable-docs \
             CC="$CC" AR="$AR" STRIP="$STRIP" RANLIB="$RANLIB"
