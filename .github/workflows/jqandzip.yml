@@ -9,19 +9,21 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      NDK_VERSION: r26b
       API: 26
       TARGET: aarch64-linux-android
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup NDK
+      - name: Setup NDK (direct download r26b)
         run: |
-          echo "Installing NDK ${NDK_VERSION}"
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;${NDK_VERSION}" >/dev/null
-          echo "NDK_ROOT=$ANDROID_HOME/ndk/${NDK_VERSION}" >> $GITHUB_ENV
+          set -euo pipefail
+          NDK_ZIP=android-ndk-r26b-linux.zip
+          curl -fL --retry 3 -o "$NDK_ZIP" \
+            "https://dl.google.com/android/repository/${NDK_ZIP}"
+          unzip -q "$NDK_ZIP"
+          echo "NDK_ROOT=$GITHUB_WORKSPACE/android-ndk-r26b" >> $GITHUB_ENV
+          rm -f "$NDK_ZIP"
 
       - name: Prepare toolchain env
         run: |
@@ -46,7 +48,7 @@ jobs:
 
       - name: Build zip
         run: |
-          curl -L -o zip30.tar.gz \
+          curl -fL -o zip30.tar.gz \
             "https://downloads.sourceforge.net/project/infozip/Zip%203.x%20%28latest%29/3.0/zip30.tar.gz"
           tar xf zip30.tar.gz
           cd zip30
@@ -56,7 +58,7 @@ jobs:
           "$STRIP" ./zip
           cp ./zip "$GITHUB_WORKSPACE/zip"
 
-      - name: Verify artifacts
+      - name: Verify
         run: |
           file jq zip || true
           ls -lh jq zip
