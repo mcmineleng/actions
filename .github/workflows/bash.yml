@@ -22,7 +22,7 @@ on:
   push:
     branches: [ main, master ]
     paths:
-      - '.github/workflows/build-bash-android.yml'
+      - '.github/workflows/bash.yml'
 
 env:
   BASH_VERSION: ${{ github.event.inputs.bash_version || '5.2.37' }}
@@ -33,7 +33,7 @@ env:
 
 jobs:
   build:
-    name: Build bash-${{ github.event.inputs.bash_version || '5.2.37' }}-aarch64
+    name: Build bash-aarch64
     runs-on: ubuntu-22.04
     timeout-minutes: 60
 
@@ -41,7 +41,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ---------- 环境 ----------
       - name: Install build deps
         run: |
           sudo apt-get update -qq
@@ -51,9 +50,6 @@ jobs:
 
       - name: Setup Android NDK
         run: |
-          echo "NDK_VERSION=${NDK_VERSION}"
-          NDK_ZIP="android-ndk-r${NDK_VERSION%%.[0-9]*}*"
-          # 优先用预装 NDK
           if [ -d "$ANDROID_NDK_LATEST_HOME" ]; then
             echo "使用预装 NDK: $ANDROID_NDK_LATEST_HOME"
             echo "ANDROID_NDK=$ANDROID_NDK_LATEST_HOME" >> $GITHUB_ENV
@@ -76,86 +72,76 @@ jobs:
           echo "READELF=$TC/bin/llvm-readelf" >> $GITHUB_ENV
           "$TC/bin/${TARGET}${API_LEVEL}-clang" --version
 
-      # ---------- 源码 ----------
       - name: Download sources
         run: |
           mkdir -p build && cd build
-          echo "::group::Bash ${BASH_VERSION}"
           wget -q "https://ftp.gnu.org/gnu/bash/bash-${BASH_VERSION}.tar.gz"
           tar xf "bash-${BASH_VERSION}.tar.gz"
-          echo "::endgroup::"
-          echo "::group::Readline ${READLINE_VERSION}"
           wget -q "https://ftp.gnu.org/gnu/readline/readline-${READLINE_VERSION}.tar.gz"
           tar xf "readline-${READLINE_VERSION}.tar.gz"
-          echo "::endgroup::"
 
-      # ---------- 补 bionic 缺失头 ----------
       - name: Patch bionic headers
         run: |
           SYSROOT="$TOOLCHAIN/sysroot/usr/include"
-          # ttydefaults.h 缺失
           if [ ! -f "$SYSROOT/sys/ttydefaults.h" ]; then
             echo "补 sys/ttydefaults.h"
             cat > "$SYSROOT/sys/ttydefaults.h" <<'EOF'
-#ifndef _SYS_TTYDEFAULTS_H_
-#define _SYS_TTYDEFAULTS_H_
-#define CCEQ(val, c) ((c) == (val) && (val) != _POSIX_VDISABLE)
-#define CTRL(x) ((x) & 037)
-#define CEOF CTRL('d')
-#define CEOL 0
-#define CERASE 0x7f
-#define CINTR CTRL('c')
-#define CKILL CTRL('u')
-#define CMIN 1
-#define CQUIT 0x1c
-#define CSTART CTRL('q')
-#define CSTOP CTRL('s')
-#define CSUSP CTRL('z')
-#define CTIME 0
-#define CBRK 0
-#define CSTATUS 0
-#define CFLUSH 0
-#endif
-EOF
+          #ifndef _SYS_TTYDEFAULTS_H_
+          #define _SYS_TTYDEFAULTS_H_
+          #define CCEQ(val, c) ((c) == (val) && (val) != _POSIX_VDISABLE)
+          #define CTRL(x) ((x) & 037)
+          #define CEOF CTRL('d')
+          #define CEOL 0
+          #define CERASE 0x7f
+          #define CINTR CTRL('c')
+          #define CKILL CTRL('u')
+          #define CMIN 1
+          #define CQUIT 0x1c
+          #define CSTART CTRL('q')
+          #define CSTOP CTRL('s')
+          #define CSUSP CTRL('z')
+          #define CTIME 0
+          #define CBRK 0
+          #define CSTATUS 0
+          #define CFLUSH 0
+          #endif
+          EOF
           fi
 
-      # ---------- 编译 readline ----------
       - name: Build readline (static)
+        working-directory: build/readline-8.2
         run: |
-          cd "build/readline-${READLINE_VERSION}"
           CC="$CC" AR="$AR" RANLIB="$RANLIB" \
           CFLAGS="-O2 -fPIE -fPIC" LDFLAGS="-pie" \
           ./configure \
             --host="$TARGET" \
-            --prefix="$PWD/../readline-install" \
+            --prefix="$GITHUB_WORKSPACE/build/readline-install" \
             --disable-shared \
             --enable-static
           make -j"$(nproc)"
           make install
-          echo "readline 产物:"
-          ls -la ../readline-install/lib/
+          ls -la "$GITHUB_WORKSPACE/build/readline-install/lib/"
 
-      # ---------- 编译 bash ----------
       - name: Configure bash
-        working-directory: build/bash-${{ env.BASH_VERSION }}
+        working-directory: build/bash-5.2.37
         env:
-          ac_cv_func_working_mktime: yes
-          bash_cv_getcwd_malloc: yes
-          bash_cv_job_control_missing: present
-          bash_cv_sys_named_pipes: yes
-          bash_cv_func_sigsetjmp: present
-          bash_cv_ulimit_maxfds: yes
-          bash_cv_getenv_redef: no
-          bash_cv_printf_a: yes
-          bash_cv_wexitstatus: yes
-          bash_cv_func_strcoll_broken: no
-          bash_cv_must_reinstall_sighandlers: no
-          bash_cv_func_ctype_nonascii: no
-          bash_cv_decl_printf_a: no
-          bash_cv_dev_fd: yes
-          bash_cv_dev_stdin: present
-          bash_cv_dev_stdout: present
-          bash_cv_dev_stderr: present
+          ac_cv_func_working_mktime: "yes"
+          bash_cv_getcwd_malloc: "yes"
+          bash_cv_job_control_missing: "present"
+          bash_cv_sys_named_pipes: "yes"
+          bash_cv_func_sigsetjmp: "present"
+          bash_cv_ulimit_maxfds: "yes"
+          bash_cv_getenv_redef: "no"
+          bash_cv_printf_a: "yes"
+          bash_cv_wexitstatus: "yes"
+          bash_cv_func_strcoll_broken: "no"
+          bash_cv_must_reinstall_sighandlers: "no"
+          bash_cv_func_ctype_nonascii: "no"
+          bash_cv_decl_printf_a: "no"
+          bash_cv_dev_fd: "yes"
+          bash_cv_dev_stdin: "present"
+          bash_cv_dev_stdout: "present"
+          bash_cv_dev_stderr: "present"
         run: |
           CC="$CC" AR="$AR" RANLIB="$RANLIB" \
           CFLAGS="-O2 -fPIE -fPIC" LDFLAGS="-pie" \
@@ -182,23 +168,21 @@ EOF
             --with-installed-readline="$GITHUB_WORKSPACE/build/readline-install"
 
       - name: Build bash
-        working-directory: build/bash-${{ env.BASH_VERSION }}
+        working-directory: build/bash-5.2.37
         run: |
           make -j"$(nproc)"
 
-      # ---------- 打包 ----------
       - name: Package artifact
         run: |
           OUT_DIR="$GITHUB_WORKSPACE/out"
           mkdir -p "$OUT_DIR"
-          BIN="build/bash-${BASH_VERSION}/bash"
+          BIN="build/bash-5.2.37/bash"
           [ -f "$BIN" ] || { echo "::error::bash 产物不存在"; exit 1; }
 
           cp "$BIN" "$OUT_DIR/bash"
           chmod 755 "$OUT_DIR/bash"
           "$STRIP" --strip-all "$OUT_DIR/bash" || true
 
-          # 验证
           echo "::group::file"
           file "$OUT_DIR/bash"
           echo "::endgroup::"
@@ -207,35 +191,21 @@ EOF
           "$READELF" -d "$OUT_DIR/bash" || true
           echo "::endgroup::"
 
-          # 版本信息
           "$OUT_DIR/bash" --version | head -1 || true
 
-          # 打包
           cd "$OUT_DIR"
-          tar czf "bash-${BASH_VERSION}-aarch64-android-api${API_LEVEL}.tar.gz" bash
-          sha256sum "bash-${BASH_VERSION}-aarch64-android-api${API_LEVEL}.tar.gz" \
-            > "bash-${BASH_VERSION}-aarch64-android-api${API_LEVEL}.tar.gz.sha256"
+          tar czf "bash-5.2.37-aarch64-android-api21.tar.gz" bash
+          sha256sum "bash-5.2.37-aarch64-android-api21.tar.gz" \
+            > "bash-5.2.37-aarch64-android-api21.tar.gz.sha256"
           ls -la
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bash-${{ env.BASH_VERSION }}-aarch64-android
+          name: bash-5.2.37-aarch64-android
           path: |
             out/bash
             out/*.tar.gz
             out/*.sha256
           retention-days: 30
           if-no-files-found: error
-
-      # ---------- 可选：发布 Release ----------
-      - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            out/*.tar.gz
-            out/*.sha256
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
