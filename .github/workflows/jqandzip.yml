@@ -49,14 +49,17 @@ jobs:
           "$STRIP" ./jq
           cp ./jq "$GITHUB_WORKSPACE/jq"
 
-      - name: Build zip
+      - name: Build zip (Info-ZIP 3.0)
         run: |
           curl -fL -o zip30.tar.gz \
             "https://downloads.sourceforge.net/project/infozip/Zip%203.x%20%28latest%29/3.0/zip30.tar.gz"
           tar xf zip30.tar.gz
           cd zip30
+          # 给 rindex 补上 <strings.h> 声明，避免 clang 17 报 implicit-function-declaration
+          sed -i 's/#include <unistd.h>/#include <unistd.h>\n#include <strings.h>/' tailor.h || true
           make -f unix/Makefile generic \
             CC="$CC" AR="$AR" STRIP="$STRIP" RANLIB="$RANLIB" \
+            CFLAGS="-O2 -D_GNU_SOURCE -Wno-implicit-function-declaration -Wno-error=implicit-function-declaration -Wno-deprecated-non-prototype" \
             LFLAGS2="-static"
           "$STRIP" ./zip
           cp ./zip "$GITHUB_WORKSPACE/zip"
