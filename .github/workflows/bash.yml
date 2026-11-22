@@ -3,10 +3,6 @@ name: Build Bash for Android (aarch64)
 on:
   workflow_dispatch:
     inputs:
-      bash_version:
-        description: 'Bash 版本'
-        required: false
-        default: '5.2.37'
       readline_version:
         description: 'Readline 版本'
         required: false
@@ -25,7 +21,6 @@ on:
       - '.github/workflows/bash.yml'
 
 env:
-  BASH_VERSION: ${{ github.event.inputs.bash_version || '5.2.37' }}
   READLINE_VERSION: ${{ github.event.inputs.readline_version || '8.2' }}
   API_LEVEL: ${{ github.event.inputs.api_level || '21' }}
   NDK_VERSION: ${{ github.event.inputs.ndk_version || '26.3.11579264' }}
@@ -50,16 +45,11 @@ jobs:
 
       - name: Setup Android NDK
         run: |
-          if [ -d "$ANDROID_NDK_LATEST_HOME" ]; then
-            echo "使用预装 NDK: $ANDROID_NDK_LATEST_HOME"
-            echo "ANDROID_NDK=$ANDROID_NDK_LATEST_HOME" >> $GITHUB_ENV
-          else
-            echo "下载 NDK ${NDK_VERSION}..."
-            wget -q "https://dl.google.com/android/repository/android-ndk-r${NDK_VERSION%-*}-linux.zip" -O ndk.zip
-            unzip -q ndk.zip
-            NDK_DIR="$PWD/$(ls -d android-ndk-* | head -1)"
-            echo "ANDROID_NDK=$NDK_DIR" >> $GITHUB_ENV
-          fi
+          echo "下载 NDK ${NDK_VERSION}..."
+          wget -q "https://dl.google.com/android/repository/android-ndk-r${NDK_VERSION%-*}-linux.zip" -O ndk.zip
+          unzip -q ndk.zip
+          NDK_DIR="$PWD/$(ls -d android-ndk-* | head -1)"
+          echo "ANDROID_NDK=$NDK_DIR" >> $GITHUB_ENV
 
       - name: Export toolchain vars
         run: |
@@ -75,8 +65,8 @@ jobs:
       - name: Download sources
         run: |
           mkdir -p build && cd build
-          wget -q "https://ftp.gnu.org/gnu/bash/bash-${BASH_VERSION}.tar.gz"
-          tar xf "bash-${BASH_VERSION}.tar.gz"
+          wget -q "https://ftp.gnu.org/gnu/bash/bash-5.2.tar.gz"
+          tar xf bash-5.2.tar.gz
           wget -q "https://ftp.gnu.org/gnu/readline/readline-${READLINE_VERSION}.tar.gz"
           tar xf "readline-${READLINE_VERSION}.tar.gz"
 
@@ -109,7 +99,7 @@ jobs:
           fi
 
       - name: Build readline (static)
-        working-directory: build/readline-8.2
+        working-directory: build/readline-${{ github.event.inputs.readline_version || '8.2' }}
         run: |
           CC="$CC" AR="$AR" RANLIB="$RANLIB" \
           CFLAGS="-O2 -fPIE -fPIC" LDFLAGS="-pie" \
@@ -123,7 +113,7 @@ jobs:
           ls -la "$GITHUB_WORKSPACE/build/readline-install/lib/"
 
       - name: Configure bash
-        working-directory: build/bash-5.2.37
+        working-directory: build/bash-5.2
         env:
           ac_cv_func_working_mktime: "yes"
           bash_cv_getcwd_malloc: "yes"
@@ -168,7 +158,7 @@ jobs:
             --with-installed-readline="$GITHUB_WORKSPACE/build/readline-install"
 
       - name: Build bash
-        working-directory: build/bash-5.2.37
+        working-directory: build/bash-5.2
         run: |
           make -j"$(nproc)"
 
@@ -176,7 +166,7 @@ jobs:
         run: |
           OUT_DIR="$GITHUB_WORKSPACE/out"
           mkdir -p "$OUT_DIR"
-          BIN="build/bash-5.2.37/bash"
+          BIN="build/bash-5.2/bash"
           [ -f "$BIN" ] || { echo "::error::bash 产物不存在"; exit 1; }
 
           cp "$BIN" "$OUT_DIR/bash"
@@ -194,15 +184,15 @@ jobs:
           "$OUT_DIR/bash" --version | head -1 || true
 
           cd "$OUT_DIR"
-          tar czf "bash-5.2.37-aarch64-android-api21.tar.gz" bash
-          sha256sum "bash-5.2.37-aarch64-android-api21.tar.gz" \
-            > "bash-5.2.37-aarch64-android-api21.tar.gz.sha256"
+          TAR="bash-5.2-aarch64-android-api${API_LEVEL}.tar.gz"
+          tar czf "$TAR" bash
+          sha256sum "$TAR" > "$TAR.sha256"
           ls -la
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bash-5.2.37-aarch64-android
+          name: bash-5.2-aarch64-android
           path: |
             out/bash
             out/*.tar.gz
