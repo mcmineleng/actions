@@ -38,7 +38,8 @@ jobs:
 
       - name: Build jq
         run: |
-          git clone --depth 1 --branch jq-1.7.1 https://github.com/jqlang/jq.git jq-src
+          git clone --depth 1 --recurse-submodules --branch jq-1.7.1 \
+            https://github.com/jqlang/jq.git jq-src
           cd jq-src
           autoreconf -i
           ./configure --host=${TARGET} --disable-shared --enable-static \
